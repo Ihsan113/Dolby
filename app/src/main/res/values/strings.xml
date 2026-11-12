@@ -1,6 +1,0 @@
-<resources>
-    <string name="app_name">ClearSound</string>
-    <string name="notification_title">ClearSound aktif</string>
-    <string name="notification_text">Efek suara sistem sedang dijalankan • Ketuk untuk membuka</string>
-    <string name="notification_channel">Pemrosesan audio</string>
-</resources>

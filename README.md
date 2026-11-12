@@ -1,75 +1,66 @@
-# ClearSound • Android Audio Enhancer
+# LocalSub — YouTube Local Subtitle (Android)
 
-**Versi:** `0.1.0` (source / beta percobaan)  
-**Platform:** Android 10+ (minSdk 29) · Fokus ponsel  
-**Teknologi:** Kotlin 2.0.21 · Jetpack Compose Material 3 · Shizuku 13.1.5  
-**Paket:** `id.danzku.clearsound`  
-**Internet:** Tidak meminta izin internet; offline.
+**Kotlin + Jetpack Compose + whisper.cpp (ARM64 / native C++)**. Mobile-only Android 10+ (API 29), no root, no Shizuku required.
 
-## Tujuan
+## What this app actually does
 
-Aplikasi equalizer dengan UI clean, mobile-first, yang mencoba menerapkan efek Android ke audio mix global melalui `android.media.audiofx.Equalizer(priority=0, audioSession=0)`. Audio Session 0 **deprecated**: setiap ROM bisa mengizinkan, menolak, atau membuat efeknya tidak terdengar pada sebagian aplikasi/output. Ini **bukan Dolby Atmos asli**, tidak mendistribusikan DSP berlisensi Dolby, dan tidak memodifikasi Audio HAL. Keberhasilan membuat engine **bukan bukti** bahwa semua aplikasi terdengar berubah.
+1. Paste a permitted YouTube link (`youtube.com/watch`, `youtu.be`, `shorts`, `live`, `embed`).
+2. Play the original YouTube video **inside YouTube's embedded player** (the app doesn't scrape or download videos).
+3. Choose a Whisper model (Tiny Q5 about 32 MB / Base Q5 about 60 MB) and download it once. The download is SHA-256 verified.
+4. Tap **Mulai subtitle lokal**. Approve Android's audio recording permission and MediaProjection consent. **Pick whole-screen sharing when offered.**
+5. The foreground service tries to capture Android `USAGE_MEDIA` output, collects mono PCM, and runs `whisper.cpp` inference locally. Captions appear below the video with a few seconds latency.
+6. If audio can't be captured, choose **Mikrofon** and use the phone speaker. Headphones generally won't work in microphone fallback mode.
+7. Copy the transcript or save a rough SRT. Timecodes are relative to the **recording session**, and are not video-synchronized after seeking/pausing.
 
-## Implementasi (bukan mockup)
+## Known limitations (please read)
 
-- Home: saklar mengaktifkan foreground service yang menyimpan instance `Equalizer` aktif; kurva grafik live; info band fisik dan pesan error.
-- Equalizer: 10 band logaritmik (31 Hz–16 kHz); disesuaikan secara interpolasi ke 1–32 band fisik dari perangkat; lima preset konservatif + kustom; nilai disimpan.
-- Quick Settings: TileService untuk ON/OFF, tombol tambah tile Android 13+; di Android 12 ke bawah tambahkan manual melalui panel Edit.
-- Onboarding pertama: tiga halaman, edukasi batasan Session 0, setup Shizuku, notifikasi dan tile; bisa diulang dari Pengaturan.
-- Shizuku: meminta izin dengan API 13.1.5. **Penggunaan spesifik**: layanan `UserService` menjalankan `cmd deviceidle whitelist +<package>` sebagai identitas ADB shell (jika ROM mengizinkan) setelah pengguna mengetuk tombol whitelist.
-- Background: foreground service bertipe `specialUse`, notifikasi persisten + action matikan, tidak start diam-diam setelah reboot.
-- Tidak ada perekaman audio, MediaProjection, analytic SDK, tracking, atau request jaringan.
-- Material 3 responsif, dark/light mengikuti sistem, navigasi 3 tab dan kontras untuk ukuran HP kecil.
+- **Not a live caption guarantee for every YouTube video.** Android's `AudioPlaybackCapture` can only capture a player when the app, player and output policy permit. Some YouTube/WebView versions, DRM content, or OEM firmware may block it, returning silence even with permission.
+- YouTube embeds can disallow video playback because of owner restrictions, region or WebView integrity/identity requirements.
+- This is **on-device speech-to-text**, NOT offline YouTube playback. You need internet for watching YouTube and the initial model download.
+- Speech recognition latency is CPU-dependent; 4-second chunks with 0.5-second overlap are used. It can lag behind on entry-level phones. Whisper models can mistranscribe music, silence and loud background sounds.
+- Captions **transcribe** the original language, not auto-translate to Indonesian. Choose one of the supported recognition languages.
+- No monetization, analytics, tracker, API token, or server-side ASR. Audio samples are not uploaded.
+- Only ARM64 builds are configured. This keeps the APK smaller on modern Android phones.
 
-## Build APK memakai GitHub Actions
+## GitHub Actions build — recommended for Android-only workflow
 
-1. Buat **repository pribadi** (atau repo publik) baru di GitHub; upload **seluruh isi** folder ini ke root repo termasuk `.github/workflows/android.yml` (folder `.github` tersembunyi, jangan sampai terlewat).
-2. Buka **Actions → ClearSound Android CI → Run workflow**. Workflow juga otomatis berjalan jika push ke `main`/`master`.
-3. Setelah status workflow hijau, buka job dan download artifact `ClearSound-debug-apk`.
-4. Ekstrak artifact dan install `app-debug.apk` pada HP Android 10+.
+**You push the source.** No GitHub repository has been modified by this package.
 
-CI memakai Java 17, Gradle 8.10.2 dan Android SDK 35. *Gradle Wrapper tidak disertakan* karena lingkungan pembuatan ini tidak memiliki binary wrapper tepercaya untuk dikemas. GitHub Actions mengunduh Gradle melalui `gradle/actions/setup-gradle@v4`. Di Android Studio, impor folder ini dan pilih Gradle 8.10.2/JDK 17 jika diminta. Perintah build bila Gradle sudah terpasang:
+1. Extract ZIP and push its **contents** to the ROOT of an empty GitHub repository; hidden `.github` must be included.
+2. Go to **Actions -> Build YouTube Local Subtitles**. It also runs automatically after push to `main`/`master`.
+3. Wait for the native build (it downloads pinned `whisper.cpp` source v1.9.5 during CI).
+4. Open the successful run -> Artifacts -> **YTLocalSubtitles-arm64-debug-APK**.
+5. Unzip to get `app-debug.apk` and install on the device.
 
-```bash
-gradle :app:testDebugUnitTest :app:assembleDebug
-```
+There is no Gradle wrapper binary in this source package. Actions installs Gradle `8.10.2` via the official setup action. For local development use Android Studio + Gradle 8.10.2 and run `bash scripts/fetch-whisper.sh` first.
 
-## Langkah penggunaan pertama
+### Build implementation
 
-1. Install ClearSound dari APK debug.
-2. Lalui onboarding. **Shizuku opsional untuk audio engine**, tetapi diperlukan untuk tombol whitelist baterai otomatis. Install dan jalankan Shizuku via Wireless Debugging, lalu ketuk **Beri izin**.
-3. Izinkan notifikasi supaya status pemrosesan terlihat.
-4. Tambahkan ClearSound ke Quick Settings melalui langkah setup atau edit panel manual.
-5. Putar musik/video lalu pilih **Clear Voice** / **Music** / **Cinema** / **Bass** dan aktifkan ClearSound.
-6. Bandingkan ON/OFF **pada volume sama**. Jika tidak ada perbedaan, Audio Session 0 bisa diabaikan oleh ROM atau output tersebut; aplikasi tidak mampu memaksa jalur sistem tanpa dukungan firmware.
+- Android Gradle Plugin: `8.7.3`; Kotlin & Compose compiler: `2.0.21`.
+- `compileSdk / targetSdk`: `35`; `minSdk`: `29`.
+- NDK: `27.2.12479018`; CMake: `3.22.1`; ABI: `arm64-v8a`.
+- `whisper.cpp` v1.9.5 source builds as CMake subproject, JNI via `native_bridge.cpp`.
+- Language auto-detect or forced `id`, `en`, `ja`, `zh`, `ko`, `es`.
 
-## Troubleshooting
+## Privacy and handling
 
-| Kondisi | Langkah |
-|---|---|
-| “EQ global tidak didukung” | Matikan equalizer bawaan, restart app, coba lagi; ROM mungkin melarang session 0. |
-| Status aktif tetapi tidak terdengar beda | Uji dengan playlist sama melalui speaker/headset; gunakan preset Clear Voice. Efek tidak dijamin berlaku global. |
-| Berhenti setelah layar mati | Buka Pengaturan → Manajemen baterai; whitelist via Shizuku bisa dicoba jika ROM mendukung. |
-| Shizuku tidak berjalan | Setelah restart HP, jalankan ulang Shizuku via Wireless Debugging. Ini normal pada Shizuku non-root. |
-| Tile tidak terlihat | Edit panel Quick Settings dan cari ClearSound; dukungan permintaan otomatis hanya Android 13+. |
-| Suara pecah | Kurangi gain band positif; di versi ini belum ada limiter brickwall native. |
+- Pasted URLs are parsed to YouTube video IDs; arbitrary websites are rejected.
+- YouTube video playback uses its own servers and policies.
+- Hugging Face model download is pinned by SHA-256. Models are stored in app-private storage.
+- Capture requires Android consent; stopping or revoking MediaProjection stops the audio service.
+- No audio stream is saved by default; transcript is stored in process memory, with explicit manual export only.
 
-## Catatan Play Store
+## Tests
 
-Versi ini adalah **prototype fungsional dan belum divalidasi untuk publikasi**. Foreground Service bertipe `specialUse` harus dijelaskan di Play Console dan dapat memerlukan review. Untuk publikasi, verifikasi manual terhadap kompatibilitas, kebijakan foreground service, aset listing, privacy policy, aksesibilitas, dan pengujian perangkat wajib dilakukan. Tidak ada klaim sertifikasi Dolby.
+`gradle :app:testDebugUnitTest` covers YouTube URL validation, PCM buffer behavior, chunk assembly, and caption deduplication. CI runs tests followed by `assembleDebug`.
 
-## Status verifikasi
+## Upstream references & licenses
 
-- ✅ XML, YAML workflow, struktur source dan algoritme interpolasi diverifikasi offline.
-- ✅ Fungsi EqCurve dikompilasi lewat Kotlin CLI dan uji midpoint dilalui.
-- ⚠️ Android APK **belum** dikompilasi di lingkungan ini (Android SDK/Gradle tidak tersedia). Workflow CI sudah disediakan untuk membangun dan mengungkap error jika ada.
-- ⚠️ Efek audio **belum** diuji langsung pada POCO M5 / ROM spesifik.
+- https://github.com/ggml-org/whisper.cpp (MIT)
+- https://huggingface.co/ggerganov/whisper.cpp (Whisper GGML models)
+- https://developer.android.com/media/platform/av-capture (playback capture rules)
+- https://developers.google.com/youtube/iframe_api_reference (YouTube embedded player)
 
-## Referensi API (bukan kode yang disalin)
+The ZIP contains our own source and build config, not the upstream Whisper source or model binary. The pinned upstream source and selected model are obtained as described above.
 
-- Android Equalizer: https://developer.android.com/reference/android/media/audiofx/Equalizer
-- AudioEffect: https://developer.android.com/reference/android/media/audiofx/AudioEffect
-- Shizuku API: https://github.com/RikkaApps/Shizuku-API
-- Android foreground service types: https://developer.android.com/about/versions/14/changes/fgs-types-required
-
-Kode ClearSound ditulis untuk proyek ini. Bukan fork dari allEQ atau produk Dolby.
+For replacing the old **Ihsan113/Dolby** ClearSound app, see [docs/REPLACING_CLEARSOUND.md](docs/REPLACING_CLEARSOUND.md).

@@ -1,4 +1,4 @@
-name: Build YouTube Local Subtitles
+name: Build LocalSub (CPU + Vulkan GPU)
 on:
   workflow_dispatch:
   push:
@@ -10,7 +10,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -20,7 +20,7 @@ jobs:
       - uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
-      - name: Install native build toolchain
+      - name: Install Android native toolchain
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
       - name: Retrieve pinned whisper.cpp source
@@ -29,12 +29,28 @@ jobs:
         with:
           gradle-version: '8.10.2'
       - name: JVM unit tests
-        run: gradle :app:testDebugUnitTest --stacktrace
-      - name: Build native arm64 debug APK
-        run: gradle :app:assembleDebug --stacktrace
-      - name: Publish APK artifact
+        run: gradle :app:testDebugUnitTest -PenableVulkan=false --stacktrace
+      - name: Build CPU APK (fallback always available)
+        run: gradle :app:assembleDebug -PenableVulkan=false --stacktrace
+      - name: Upload CPU APK
         uses: actions/upload-artifact@v4
         with:
-          name: YTLocalSubtitles-arm64-debug-APK
+          name: LocalSub-cpu-arm64-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Install Vulkan shader tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y glslc glslang-tools libvulkan-dev
+          which glslc
+      - name: Build Vulkan GPU APK (experimental)
+        id: gpu
+        continue-on-error: true
+        run: gradle :app:assembleDebug -PenableVulkan=true --stacktrace
+      - name: Upload Vulkan APK (if compiled)
+        if: steps.gpu.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalSub-vulkan-arm64-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

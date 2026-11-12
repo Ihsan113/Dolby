@@ -33,6 +33,7 @@ import kotlin.math.abs
 /** Foreground worker for approved playback capture or explicit microphone fallback. */
 class CaptionService : Service() {
     private val running = AtomicBoolean(false)
+    private val releaseInProgress = AtomicBoolean(false)
     private var recorder: AudioRecord? = null
     private var projection: MediaProjection? = null
     private var captureThread: Thread? = null
@@ -62,6 +63,8 @@ class CaptionService : Service() {
         val model = runCatching { WhisperModel.valueOf(intent.getStringExtra(EXTRA_MODEL).orEmpty()) }
             .getOrDefault(WhisperModel.TINY)
         val lang = intent.getStringExtra(EXTRA_LANGUAGE) ?: "auto"
+        val compute = runCatching { ComputeMode.valueOf(intent.getStringExtra(EXTRA_COMPUTE).orEmpty()) }
+            .getOrDefault(ComputeMode.AUTO)
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
         val resultData: Intent? = if (Build.VERSION.SDK_INT >= 33)
             intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
@@ -81,7 +84,7 @@ class CaptionService : Service() {
             }
             CaptionBus.preparing()
             running.set(true)
-            captureThread = Thread({ runCapture(model, lang, mode, resultCode, resultData) }, "LocalSub-Capture").apply { start() }
+            captureThread = Thread({ runCapture(model, lang, mode, compute, resultCode, resultData) }, "LocalSub-Capture").apply { start() }
         } catch (e: Exception) {
             CaptionBus.fail("Tidak bisa memulai: ${e.message ?: "izin ditolak"}")
             stopWork()
@@ -90,17 +93,17 @@ class CaptionService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun runCapture(model: WhisperModel, language: String, mode: AudioSourceMode, resultCode: Int, resultData: Intent?) {
+    private fun runCapture(model: WhisperModel, language: String, mode: AudioSourceMode, compute: ComputeMode, resultCode: Int, resultData: Intent?) {
         try {
             val modelFile = ModelDownloader.destination(this, model)
             check(modelFile.isFile && modelFile.length() > 20_000_000L) { "Model ASR belum tersedia" }
-            check(WhisperNative.loadModel(modelFile.absolutePath)) { "Model Whisper gagal dimuat" }
+            check(WhisperNative.loadModel(modelFile.absolutePath, compute == ComputeMode.AUTO)) { "Model Whisper gagal dimuat" }
             modelLoaded = true
-            if (!running.get()) {
-                WhisperNative.unload()
-                modelLoaded = false
-                return
-            }
+            val backend = WhisperNative.backendLabel()
+            // Warm-up runs before capture and before the WebView can load: an honest loading phase.
+            val warmupMs = WhisperNative.warmup()
+            CaptionBus.warmedUp(backend, warmupMs)
+            if (!running.get()) return
 
             val sampleRate = 16_000
             val format = AudioFormat.Builder()
@@ -221,7 +224,8 @@ class CaptionService : Service() {
 
     private fun stopWork() {
         running.set(false)
-        recognitionThread?.interrupt()
+        val pendingRecognition = recognitionThread
+        pendingRecognition?.interrupt()
         recognitionThread = null
         recorder?.let { a ->
             runCatching { a.stop() }
@@ -234,9 +238,23 @@ class CaptionService : Service() {
         }
         projection = null
         projectionCallback = null
-        // Native unload serializes against in-flight transcribe, no dangling model pointer.
-        if (modelLoaded) { runCatching { WhisperNative.unload() }; modelLoaded = false }
-        if (CaptionBus.state.value.running) CaptionBus.stopped()
+        // Inference and GPU unload may take seconds: never block the main/notification thread.
+        if (modelLoaded && releaseInProgress.compareAndSet(false, true)) {
+            modelLoaded = false
+            val keepFailure = !CaptionBus.state.value.running
+            if (!keepFailure) CaptionBus.stopping()
+            Thread({
+                try {
+                    runCatching { pendingRecognition?.join() }
+                    runCatching { WhisperNative.unload() }
+                } finally {
+                    releaseInProgress.set(false)
+                    if (!keepFailure) CaptionBus.stopped()
+                }
+            }, "LocalSub-Release").start()
+        } else if (!releaseInProgress.get() && CaptionBus.state.value.running) {
+            CaptionBus.stopped()
+        }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
     }
 
@@ -269,17 +287,19 @@ class CaptionService : Service() {
         const val EXTRA_SOURCE = "source"
         const val EXTRA_MODEL = "model"
         const val EXTRA_LANGUAGE = "language"
+        const val EXTRA_COMPUTE = "compute"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         const val CHANNEL_ID = "localsub_capture"
         const val NOTIFICATION_ID = 2401
 
         fun start(context: Context, source: AudioSourceMode, model: WhisperModel, language: SpeechLang,
-                  code: Int = 0, data: Intent? = null) {
+                  compute: ComputeMode, code: Int = 0, data: Intent? = null) {
             val intent = Intent(context, CaptionService::class.java).setAction(ACTION_START).apply {
                 putExtra(EXTRA_SOURCE, source.name)
                 putExtra(EXTRA_MODEL, model.name)
                 putExtra(EXTRA_LANGUAGE, language.code)
+                putExtra(EXTRA_COMPUTE, compute.name)
                 putExtra(EXTRA_RESULT_CODE, code)
                 if (data != null) putExtra(EXTRA_RESULT_DATA, data)
             }

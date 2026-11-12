@@ -13,6 +13,8 @@ enum class WhisperModel(val title: String, val fileName: String, val sha256: Str
         get() = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$fileName"
 }
 
+enum class ComputeMode(val label: String) { AUTO("GPU Vulkan (Auto)"), CPU("CPU stabil") }
+
 enum class AudioSourceMode { DEVICE, MICROPHONE }
 
 enum class SpeechLang(val label: String, val code: String) {

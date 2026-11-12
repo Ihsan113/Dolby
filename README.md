@@ -1,3 +1,23 @@
+# LocalSub v1.1 — Model warmup & optional Vulkan GPU
+
+> **Status:** Source Android diperbarui; kompilasi APK Android/NDK dan pengujian GPU di POCO M5 belum bisa dilakukan di lingkungan pembuat ZIP ini. Tidak ada push GitHub.
+
+## Pembaruan
+
+- Menahan pemutar YouTube sampai model Whisper dimuat, satu inferensi pemanasan selesai, dan AudioRecord berhasil dimulai.
+- Indikator status loading, backend, waktu pemanasan, dan waktu inferensi.
+- Pemrosesan offline dalam foreground service / worker, bukan thread UI.
+- Opsi Vulkan (`-PenableVulkan=true`) dengan CPU fallback bila hardware/runtime tak kompatibel.
+- Potongan suara 2,5 dtk + overlap 250 ms; tetap ada delay minimum suara 2,5 dtk + waktu inferensi.
+- HTML YouTube WebView memakai base URL HTTPS + kebijakan referer yang sesuai; tautan membuka YouTube sebagai fallback.
+- Workflow menghasilkan **dua APK**: CPU stabil, Vulkan eksperimental.
+
+**Tidak ada pretranskripsi penuh sebelum video diputar:** aplikasi hanya bisa memanaskan model. Mendapatkan subtitle kalimat yang belum diputar memerlukan akses sah ke konten audio video terlebih dahulu, yang tidak disediakan oleh URL saja. YouTube embed atau audio capture tetap bisa ditolak.
+
+Baca `docs/GPU_AND_STARTUP.md` untuk arsitektur, pilihan APK, dan cara uji.
+
+---
+
 # LocalSub — YouTube Local Subtitle (Android)
 
 **Kotlin + Jetpack Compose + whisper.cpp (ARM64 / native C++)**. Mobile-only Android 10+ (API 29), no root, no Shizuku required.

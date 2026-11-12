@@ -46,7 +46,7 @@ private val Sky = Color(0xFF80D5E4)
 @Composable
 fun LocalSubApp(
     settings: LocalSettings,
-    start: (AudioSourceMode, WhisperModel, SpeechLang) -> Unit,
+    start: (AudioSourceMode, WhisperModel, SpeechLang, ComputeMode) -> Unit,
     stop: () -> Unit,
     notifyPermission: () -> Unit,
     feedback: (String) -> Unit
@@ -71,6 +71,7 @@ fun LocalSubApp(
     var model by remember { mutableStateOf(settings.model) }
     var language by remember { mutableStateOf(settings.language) }
     var source by remember { mutableStateOf(settings.source) }
+    var compute by remember { mutableStateOf(settings.computeMode) }
     var inputError by remember { mutableStateOf(false) }
     val caption by CaptionBus.state.collectAsState()
     val downloadStatus = ModelDownloader.status
@@ -162,7 +163,18 @@ fun LocalSubApp(
                                 Text("Muat video")
                             }
                         }
-                        VideoSurface(videoId)
+                        VideoSurface(videoId, caption.readyForPlayback, caption.phase)
+                        if (videoId != null) {
+                            TextButton(onClick = {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/watch?v=$videoId"))
+                                )
+                            }, modifier = Modifier.fillMaxWidth()) {
+                                Icon(Icons.Rounded.OpenInNew, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Buka di YouTube jika video tidak tersedia")
+                            }
+                        }
                         SubtitlePanel(caption)
                         if (caption.running) {
                             Button(onClick = stop, modifier = Modifier.fillMaxWidth().height(54.dp),
@@ -177,7 +189,7 @@ fun LocalSubApp(
                                 onClick = {
                                     if (videoId == null) feedback("Muat URL video terlebih dahulu")
                                     else if (!modelReady) feedback("Unduh model Whisper terlebih dahulu")
-                                    else { CaptionBus.reset(); start(source, model, language) }
+                                    else { CaptionBus.reset(); start(source, model, language, compute) }
                                 },
                                 modifier = Modifier.fillMaxWidth().height(54.dp),
                                 enabled = videoId != null && modelReady,
@@ -239,7 +251,7 @@ fun LocalSubApp(
                                 }
                             }
                         }
-                        Text("Transkripsi berjalan di HP. Subtitle ditampilkan secara bertahap, tidak langsung, dan cap waktu SRT dihitung dari awal sesi (bukan waktu video saat seek).",
+                        Text("Mesin AI disiapkan sebelum pemutar muncul. Setelah siap, tekan Play di YouTube. Subtitle muncul setelah audio terdengar + pemrosesan, bukan instan. SRT memakai waktu sesi, bukan waktu video setelah seek.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
@@ -249,6 +261,11 @@ fun LocalSubApp(
                         }, downloadStatus,
                             { ModelDownloader.download(context, model) },
                             notifyPermission,
+                            compute,
+                            { next ->
+                                if (caption.running) feedback("Hentikan transkripsi sebelum mengganti akselerasi")
+                                else { compute = next; settings.computeMode = next }
+                            },
                             { onboarded = false },
                             caption)
                     }
@@ -298,13 +315,31 @@ private fun SectionHeading(heading: String, subtitle: String) {
 }
 
 @Composable
-private fun VideoSurface(videoId: String?) {
+private fun VideoSurface(videoId: String?, readyForPlayback: Boolean, phase: String) {
     Surface(shape = RoundedCornerShape(23.dp), color = Color(0xFF070A12)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentAlignment = Alignment.Center) {
             if (videoId == null) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Icon(Icons.Rounded.PlayCircleOutline, null, Modifier.size(52.dp), tint = Color(0xFF8799B3))
                     Text("Video akan muncul di sini", color = Color(0xFFBCC9DA))
+                }
+            } else if (!readyForPlayback) {
+                Column(
+                    Modifier.fillMaxWidth().padding(18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Rounded.Memory, null, Modifier.size(42.dp), tint = Color(0xFF8FB3FF))
+                    Text("Video ditahan sampai mesin AI siap", color = Color.White, textAlign = TextAlign.Center)
+                    Text(
+                        if (phase.startsWith("Memuat") || phase.startsWith("Mesin AI")) phase
+                        else "Tekan 'Mulai subtitle lokal' untuk persiapan.",
+                        color = Color(0xFFB0BED7), textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (phase.startsWith("Memuat") || phase.startsWith("Mesin AI")) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth(0.62f))
+                    }
                 }
             } else {
                 AndroidView(
@@ -324,8 +359,17 @@ private fun VideoSurface(videoId: String?) {
                         if (view.tag != videoId) {
                             view.tag = videoId
                             val safeId = checkNotNull(VideoUrl.extract("https://youtu.be/$videoId"))
-                            val url = "https://www.youtube.com/embed/$safeId?playsinline=1&rel=0"
-                            view.loadUrl(url, mapOf("Referer" to "https://www.youtube.com/"))
+                            // Official YouTube embed with a real HTTPS base URL; do not download or bypass videos.
+                            val html = """<!doctype html><html><head>
+                                <meta name="viewport" content="width=device-width,initial-scale=1">
+                                <meta name="referrer" content="strict-origin-when-cross-origin">
+                                <style>html,body{margin:0;background:#000;width:100%;height:100%;overflow:hidden}
+                                iframe{border:0;width:100%;height:100%}</style></head><body>
+                                <iframe src="https://www.youtube.com/embed/$safeId?playsinline=1&amp;rel=0"
+                                  allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+                                  referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+                                </body></html>""".trimIndent()
+                            view.loadDataWithBaseURL("https://www.youtube.com/", html, "text/html", "UTF-8", null)
                         }
                     }
                 )
@@ -344,10 +388,10 @@ private fun SubtitlePanel(state: CaptionViewState) {
                 Text("Subtitle langsung", style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Surface(shape = CircleShape,
-                    color = if (state.running) MaterialTheme.colorScheme.primary.copy(alpha = 0.17f)
+                    color = if (state.readyForPlayback) MaterialTheme.colorScheme.primary.copy(alpha = 0.17f)
                     else MaterialTheme.colorScheme.surfaceVariant) {
-                    Text(if (state.running) "ON" else "OFF", Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = if (state.running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    Text(if (state.readyForPlayback) "READY" else if (state.running) "LOAD" else "OFF", Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        color = if (state.readyForPlayback) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
             }
@@ -357,7 +401,12 @@ private fun SubtitlePanel(state: CaptionViewState) {
                     .padding(16.dp), contentAlignment = Alignment.Center
             ) {
                 Text(
-                    state.cues.lastOrNull()?.text ?: if (state.running) "Mendengarkan dan memproses ucapan..." else "Subtitle muncul di sini setelah kamu menekan Mulai.",
+                    state.cues.lastOrNull()?.text ?: when {
+                        state.running && !state.readyForPlayback -> "Memuat & memanaskan AI dulu..."
+                        state.readyForPlayback && !state.audioDetected -> "Siap! Tekan Play di video untuk memulai."
+                        state.readyForPlayback -> "Sedang mengenali suara..."
+                        else -> "Subtitle muncul setelah menyiapkan AI dan memutar video."
+                    },
                     textAlign = TextAlign.Center, fontSize = 17.sp, lineHeight = 26.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onBackground
@@ -368,11 +417,16 @@ private fun SubtitlePanel(state: CaptionViewState) {
                     null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    if (state.audioDetected) "Audio terdeteksi • ${state.lastInferenceMs} ms/proses"
+                    if (state.audioDetected) "${state.backend} • ${state.lastInferenceMs} ms/proses"
                     else state.phase,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+            if (state.warmupMs > 0L) {
+                Text("Backend: ${state.backend} • pemanasan ${state.warmupMs} ms",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             state.warning?.let { warning ->
                 Text(warning, color = MaterialTheme.colorScheme.error,
@@ -458,6 +512,8 @@ private fun SettingsPanel(
     status: ModelStatus,
     download: () -> Unit,
     notifyPermission: () -> Unit,
+    compute: ComputeMode,
+    chooseCompute: (ComputeMode) -> Unit,
     reopenGuide: () -> Unit,
     caption: CaptionViewState
 ) {
@@ -480,15 +536,35 @@ private fun SettingsPanel(
         }
     }
     SurfaceCard {
+        SectionHeading("Akselerasi AI", "Percobaan GPU Vulkan dengan fallback CPU")
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ComputeMode.entries.forEach { option ->
+                FilterChip(
+                    selected = option == compute,
+                    onClick = { chooseCompute(option) },
+                    label = { Text(if (option == ComputeMode.AUTO) "GPU otomatis" else "CPU stabil") }
+                )
+            }
+        }
+        Text(
+            "GPU hanya berjalan pada APK Vulkan dan perangkat dengan driver yang kompatibel. " +
+                "Mode otomatis tetap bisa memakai CPU. Gunakan APK CPU jika Vulkan gagal atau lebih lambat.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text("Backend saat ini: ${caption.backend}", style = MaterialTheme.typography.bodyMedium)
+    }
+    SurfaceCard {
         SectionHeading("Privasi dan kompatibilitas", "Tidak ada server STT, akun, atau token API")
         Spacer(Modifier.height(12.dp))
-        Text("Transkripsi menggunakan whisper.cpp di CPU ARM64. Video tetap dimuat dari YouTube. Model diunduh dari Hugging Face sekali saja.",
+        Text("Transkripsi lokal menggunakan whisper.cpp di ARM64 dengan opsi Vulkan. Video tetap berasal dari YouTube dan model diunduh dari Hugging Face sekali.",
             style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(10.dp))
         Text("AudioPlaybackCapture hanya bekerja jika Android dan pemutar mengizinkan. Video dengan DRM, pembatasan embed, atau pengaturan capture dapat gagal.",
             color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(10.dp))
-        Text("Status: ${caption.phase} | Versi 1.0.0-beta1", style = MaterialTheme.typography.bodySmall,
+        Text("Status: ${caption.phase} | Versi 1.1.0-beta2", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = notifyPermission, modifier = Modifier.fillMaxWidth()) {
@@ -507,11 +583,11 @@ private fun SettingsPanel(
 @Composable
 private fun Onboarding(onFinish: () -> Unit) {
     var page by remember { mutableIntStateOf(0) }
-    val titles = listOf("Video apa pun, satu tempat.", "Subtitle AI tanpa cloud.", "Izinkan audio, lalu mulai.")
+    val titles = listOf("Link YouTube, satu tempat.", "Model AI lokal dengan opsi GPU.", "Persiapkan AI, baru putar.")
     val descriptions = listOf(
         "Tempel URL video YouTube, lalu putar melalui pemutar yang tersedia di aplikasi.",
-        "Whisper.cpp memproses audio di HP secara lokal. Unduh model saat pertama kali menggunakan; setelah itu transkripsi tak perlu internet.",
-        "Pilih Audio perangkat dan setujui dialog Android. Bila pemutar menolak perekaman, pilih Mikrofon dan nyalakan speaker HP."
+        "Whisper.cpp memproses ucapan di HP. Pilih Vulkan jika tersedia, atau CPU stabil. Internet hanya untuk video dan unduhan model.",
+        "Saat ditekan Mulai, aplikasi memuat dan memanaskan AI terlebih dahulu. Pemutar baru muncul setelah perekaman siap, lalu tekan Play di video."
     )
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
         .padding(horizontal = 24.dp, vertical = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -542,8 +618,8 @@ private fun Onboarding(onFinish: () -> Unit) {
                     Text("Persiapan pertama", fontWeight = FontWeight.SemiBold)
                     Text("1  Unduh model Tiny / Base.")
                     Text("2  Tempel dan muat URL YouTube.")
-                    Text("3  Tekan Mulai dan izinkan perekaman.")
-                    Text("4  Tunggu 5–15 detik pertama (bergantung CPU).")
+                    Text("3  Tekan Mulai; tunggu pemanasan AI.")
+                    Text("4  Ketika siap, tekan Play pada video YouTube.")
                 }
             }
         }

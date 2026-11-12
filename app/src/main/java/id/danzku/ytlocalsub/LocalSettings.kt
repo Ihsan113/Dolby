@@ -13,6 +13,9 @@ class LocalSettings(context: Context) {
     var language: SpeechLang
         get() = enumValueOrDefault(prefs.getString("language", null), SpeechLang.AUTO)
         set(value) { prefs.edit().putString("language", value.name).apply() }
+    var computeMode: ComputeMode
+        get() = enumValueOrDefault(prefs.getString("compute_mode", null), ComputeMode.AUTO)
+        set(value) { prefs.edit().putString("compute_mode", value.name).apply() }
     var source: AudioSourceMode
         get() = enumValueOrDefault(prefs.getString("source", null), AudioSourceMode.DEVICE)
         set(value) { prefs.edit().putString("source", value.name).apply() }

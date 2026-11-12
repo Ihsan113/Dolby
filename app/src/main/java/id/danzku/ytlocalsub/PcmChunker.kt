@@ -1,9 +1,9 @@
 package id.danzku.ytlocalsub
 
-/** Builds continuous 4-second PCM windows with a short overlap for word boundaries. */
+/** Builds continuous 2.5-second PCM windows with overlap; model should be warmed before capture. */
 class PcmChunker(
-    private val windowSamples: Int = 16_000 * 4,
-    private val overlapSamples: Int = 16_000 / 2
+    private val windowSamples: Int = 16_000 * 5 / 2,
+    private val overlapSamples: Int = 16_000 / 4
 ) {
     init { require(windowSamples > overlapSamples && overlapSamples >= 0) }
     private val working = FloatArray(windowSamples)

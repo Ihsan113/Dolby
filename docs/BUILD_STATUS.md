@@ -1,17 +1,20 @@
-# Validation status at ZIP packaging
+# Status validasi source v1.1.0-beta2
 
-Checks completed in this authoring environment:
+## Pemeriksaan yang dilakukan
 
-- Pure Kotlin domain classes (`VideoUrl`, `PcmRing`, `PcmChunker`, `CaptionText`) compiled via local Kotlin compiler.
-- Domain smoke tests passed (valid/invalid YouTube URL, PCM buffer rollover, chunk overlap, deduplication).
-- All Android XML resources and manifest parsed successfully.
-- `.github/workflows/android.yml` parsed as valid YAML.
-- ZIP file integrity and structure verified after packaging.
+- File Kotlin inti diparse oleh kompiler Kotlin lokal (tanpa Android SDK; unresolved Android imports adalah keterbatasan alat lokal).
+- Kelas pure Kotlin (`VideoUrl`, `CaptionText`, `PcmChunker`, `PcmRing`) dikompilasi dan diuji dengan test harness lokal.
+- XML/manifest dan workflow YAML diperiksa dengan parser.
+- Referensi JNI baru (`loadModel(path, requestGpu)`, `backendLabel()`, `warmup()`, `transcribe`, `unload`) diperiksa konsistensi penamaannya.
+- ZIP diverifikasi via `ZipFile.testzip()` dan daftar path.
 
-Not yet completed:
+## Belum diverifikasi
 
-- Full Gradle/Android NDK build, because this authoring environment lacks Android SDK/NDK and cannot fetch them directly.
-- Physical device test or audio capture test against YouTube embeds.
-- Verifying Whisper v1.9.5 CMake integration in GitHub Actions (workflow included for you to run after push).
+- APK `assembleDebug` lengkap; Android SDK/NDK dan dependency jar tidak tersedia di lingkungan penyusun.
+- Vulkan backend (`GGML_VULKAN=ON`) pada whisper.cpp v1.9.5 di GitHub Actions atau GPU Mali POCO M5.
+- Kinerja GPU / thermal throttling / konsumsi memori model terhadap playback.
+- Kompatibilitas YouTube embed `152-4` dan pembatasan AudioPlaybackCapture pada video sesungguhnya.
 
-These limitations are not hidden behind a claimed successful APK build. If Actions reports a failure, share the job URL and it can be fixed without pushing from this session.
+## Saat build di GitHub Actions
+
+Workflow membangun dua varian terpisah: `LocalSub-cpu-arm64-debug` dan `LocalSub-vulkan-arm64-debug`. Jika Vulkan gagal dikompilasi atau crash di device, gunakan varian CPU. Repo Anda **tidak** diubah oleh pembuatan ZIP ini.

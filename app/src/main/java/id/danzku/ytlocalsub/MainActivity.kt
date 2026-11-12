@@ -17,7 +17,7 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
     private lateinit var settings: LocalSettings
-    private data class StartRequest(val source: AudioSourceMode, val model: WhisperModel, val language: SpeechLang)
+    private data class StartRequest(val source: AudioSourceMode, val model: WhisperModel, val language: SpeechLang, val compute: ComputeMode)
     private var pending: StartRequest? = null
 
     private val audioPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
         val request = pending
         if (result.resultCode == Activity.RESULT_OK && result.data != null && request != null) {
             runCatching {
-                CaptionService.start(this, request.source, request.model, request.language, result.resultCode, result.data)
+                CaptionService.start(this, request.source, request.model, request.language, request.compute, result.resultCode, result.data)
             }.onFailure { CaptionBus.fail("Tidak dapat memulai layanan: ${it.message}") }
         } else {
             CaptionBus.fail("Izin tangkap audio dibatalkan. Pilih Mikrofon jika audio video diblokir.")
@@ -56,13 +56,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startCapture(source: AudioSourceMode, model: WhisperModel, lang: SpeechLang) {
+    private fun startCapture(source: AudioSourceMode, model: WhisperModel, lang: SpeechLang, compute: ComputeMode) {
         if (CaptionBus.state.value.running) return
         if (!ModelDownloader.existing(this, model)) {
             toast("Unduh model ASR terlebih dahulu.")
             return
         }
-        pending = StartRequest(source, model, lang)
+        pending = StartRequest(source, model, lang, compute)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             audioPermission.launch(Manifest.permission.RECORD_AUDIO)
         } else continueStart()
@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
     private fun continueStart() {
         val request = pending ?: return
         if (request.source == AudioSourceMode.MICROPHONE) {
-            runCatching { CaptionService.start(this, request.source, request.model, request.language) }
+            runCatching { CaptionService.start(this, request.source, request.model, request.language, request.compute) }
                 .onFailure { CaptionBus.fail("Gagal memulai mikrofon: ${it.message}") }
             pending = null
             return

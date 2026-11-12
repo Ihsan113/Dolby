@@ -12,12 +12,12 @@ android {
         applicationId = "id.danzku.ytlocalsub"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0-beta1"
+        versionCode = 2
+        versionName = "1.1.0-beta2"
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
             cmake {
-                arguments += listOf("-DCMAKE_BUILD_TYPE=Release", "-DGGML_NATIVE=OFF", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_EXAMPLES=OFF")
+                arguments += listOf("-DCMAKE_BUILD_TYPE=Release", "-DGGML_NATIVE=OFF", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_EXAMPLES=OFF", "-DLOCALSUB_ENABLE_VULKAN=${project.findProperty("enableVulkan") == "true"}")
                 cppFlags += listOf("-std=c++17", "-O3")
             }
         }
